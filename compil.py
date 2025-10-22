@@ -8,19 +8,26 @@ opcode_map = {
     "ADDI": 0b00000110,
     "SUB":  0b00000111,
     "SUBI": 0b00001000,
-    "INC":  0b00001001,
-    "DEC":  0b00001010,
-    "JMP":  0b00001011,
-    "JZ":   0b00001100,
-    "JNZ":  0b00001101,
-    "OUT":  0b00001110,
+    "DIV":  0b00001001,
+    "MOD":  0b00001010,
+    "INC":  0b00001011,
+    "DEC":  0b00001100,
+    "JMP":  0b00001101,
+    "JZ":   0b00001110,
+    "JNZ":  0b00001111,
+    "STI":  0b00010000,
     "HALT": 0b11111111,
 }
 
 operand_count = {
-    "NOP":  0, "HALT": 0, "LDI": 2, "LD": 2, "ST": 2,
-    "MOV": 2, "ADD": 2, "ADDI": 2, "SUB": 2, "SUBI": 2,
-    "INC": 1, "DEC": 1, "JMP": 1, "JZ": 2, "JNZ": 2, "OUT": 1
+    "NOP":  0, "HALT": 0,
+    "LDI": 2, "LD": 2, "ST": 2,
+    "MOV": 2, "ADD": 2, "ADDI": 2,
+    "SUB": 2, "SUBI": 2,
+    "INC": 1, "DEC": 1,
+    "JMP": 1, "JZ": 2, "JNZ": 2,
+    "DIV": 2, "STI": 2,
+    "MOD": 2,
 }
 
 
@@ -138,7 +145,7 @@ def compile_program(file_path):
 # Пример использования
 # ---------------------------
 if __name__ == "__main__":
-    bytecode = compile_program("test.txt")
+    bytecode = compile_program("program.txt")
     print(f"\nРазмер программы: {len(bytecode)} байт")
     print(f"Свободно: {256 - len(bytecode)} байт\n")
     print("Байт-код:")
