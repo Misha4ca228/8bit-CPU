@@ -16,6 +16,7 @@ opcode_map = {
     "JZ":   0b00001110,
     "JNZ":  0b00001111,
     "STI":  0b00010000,
+    "MUL":  0b00010001,
     "HALT": 0b11111111,
 }
 
@@ -27,7 +28,7 @@ operand_count = {
     "INC": 1, "DEC": 1,
     "JMP": 1, "JZ": 2, "JNZ": 2,
     "DIV": 2, "STI": 2,
-    "MOD": 2,
+    "MOD": 2, "MUL": 2
 }
 
 
