@@ -52,7 +52,7 @@ class CPU8Bit:
             70: "@", 71: "%", 72: "$",
             73: "~", 74: "|", 75: "<",
             76: ">", 77: ";", 78: "✡",
-            79:"^", 80: "#", 81: "[",
+            79: "^", 80: "#", 81: "[",
             82: "]", 83: "{", 84: "}",
 
         }
@@ -78,209 +78,230 @@ class CPU8Bit:
             self.console_text.insert(tk.END, text)
 
     def run(self):
-
         self.start_console()
         self.running = True
         self.pc = 0
+        self.all_opcode_count = 0
+
         print("=" * 50)
-        print("Запуск программы 8-битного эмулятора")
-        print(f"Общий вес программы: {len(self.program)} Байт")
-        if len(self.program) >= 256:
-            raise ValueError("Ошибка: Программа больше 256 Байт!")
+        print("Запуск 8-битного эмулятора")
+        print(f"Размер программы: {len(self.program)} байт")
         print("=" * 50)
 
         while self.pc < len(self.memory):
             opcode = self.memory[self.pc]
 
-            if opcode == 0b11111111:  # HALT
-                print("=" * 50)
-                print(f"[PC={self.pc:03}] Выполнение программы завершено")
-                break
-
-            # LDI
-            if opcode == 0b00000001:
-                reg = self.memory[self.pc + 1]
+            # ====================================================
+            # 1️⃣ Работа с памятью и регистрами
+            # ====================================================
+            if opcode == 0b00000001:  # LDI
+                r = self.memory[self.pc + 1]
                 val = self.memory[self.pc + 2] & 0xFF
-                self.registers[reg] = val
-                print(f"[PC={self.pc:03}] LDI: Загружено {val} (0b{val:08b}) в регистр R{reg}")
+                self.registers[r] = val
+                print(f"[PC={self.pc:03}] LDI: R{r} <- {val}")
                 self.pc += 3
 
-            # LD
-            elif opcode == 0b00000010:
-                reg = self.memory[self.pc + 1]
+            elif opcode == 0b00000010:  # LD
+                r = self.memory[self.pc + 1]
                 addr = self.memory[self.pc + 2]
-                val = self.memory[addr] & 0xFF
-                self.registers[reg] = val
-                print(f"[PC={self.pc:03}] LD: Загружено {val} (0b{val:08b}) из памяти[{addr}] в R{reg}")
+                self.registers[r] = self.memory[addr] & 0xFF
+                print(f"[PC={self.pc:03}] LD: R{r} <- MEM[{addr}] ({self.registers[r]})")
                 self.pc += 3
 
-            # ST
-            elif opcode == 0b00000011:
-                reg = self.memory[self.pc + 1]
+            elif opcode == 0b00000011:  # ST
+                r = self.memory[self.pc + 1]
                 addr = self.memory[self.pc + 2]
-                val = self.registers[reg] & 0xFF
-                self.memory[addr] = val
-                print(f"[PC={self.pc:03}] ST: Сохранено {val} (0b{val:08b}) из R{reg} в память[{addr}]")
+                self.memory[addr] = self.registers[r] & 0xFF
+                print(f"[PC={self.pc:03}] ST: MEM[{addr}] <- R{r} ({self.registers[r]})")
                 self.pc += 3
 
-            # MOV
-            elif opcode == 0b00000100:
-                regA = self.memory[self.pc + 1]
-                regB = self.memory[self.pc + 2]
-                val = self.registers[regB] & 0xFF
-                self.registers[regA] = val
-                print(f"[PC={self.pc:03}] MOV: R{regA} <- R{regB} ({val})")
+            elif opcode == 0b00000100:  # MOV
+                rA = self.memory[self.pc + 1]
+                rB = self.memory[self.pc + 2]
+                self.registers[rA] = self.registers[rB] & 0xFF
+                print(f"[PC={self.pc:03}] MOV: R{rA} <- R{rB} ({self.registers[rB]})")
                 self.pc += 3
 
-            # ADD
-            elif opcode == 0b00000101:
-                regA = self.memory[self.pc + 1]
-                regB = self.memory[self.pc + 2]
-                result = (self.registers[regA] + self.registers[regB]) & 0xFF
-                self.registers[regA] = result
-                print(f"[PC={self.pc:03}] ADD: R{regA} = R{regA} + R{regB} = {result}")
+            elif opcode == 0b00000101:  # STI
+                r_src = self.memory[self.pc + 1]
+                r_addr = self.memory[self.pc + 2]
+                addr = self.registers[r_addr] & 0xFF
+                self.memory[addr] = self.registers[r_src] & 0xFF
+                print(f"[PC={self.pc:03}] STI: MEM[R{r_addr}] <- R{r_src}")
                 self.pc += 3
 
-            # ADDI
-            elif opcode == 0b00000110:
-                reg = self.memory[self.pc + 1]
+            # ====================================================
+            # 2️⃣ Арифметические операции
+            # ====================================================
+            elif opcode == 0b00001000:  # ADD
+                rA = self.memory[self.pc + 1]
+                rB = self.memory[self.pc + 2]
+                self.registers[rA] = (self.registers[rA] + self.registers[rB]) & 0xFF
+                print(f"[PC={self.pc:03}] ADD: R{rA} = R{rA} + R{rB}")
+                self.pc += 3
+
+            elif opcode == 0b00001001:  # ADDI
+                r = self.memory[self.pc + 1]
                 val = self.memory[self.pc + 2]
-                result = (self.registers[reg] + val) & 0xFF
-                self.registers[reg] = result
-                print(f"[PC={self.pc:03}] ADDI: R{reg} = R{reg} + {val} = {result}")
+                self.registers[r] = (self.registers[r] + val) & 0xFF
+                print(f"[PC={self.pc:03}] ADDI: R{r} += {val}")
                 self.pc += 3
 
-            # SUB
-            elif opcode == 0b00000111:
-                regA = self.memory[self.pc + 1]
-                regB = self.memory[self.pc + 2]
-                result = (self.registers[regA] - self.registers[regB]) & 0xFF
-                self.registers[regA] = result
-                print(f"[PC={self.pc:03}] SUB: R{regA} = R{regA} - R{regB} = {result}")
+            elif opcode == 0b00001010:  # SUB
+                rA = self.memory[self.pc + 1]
+                rB = self.memory[self.pc + 2]
+                self.registers[rA] = (self.registers[rA] - self.registers[rB]) & 0xFF
+                print(f"[PC={self.pc:03}] SUB: R{rA} = R{rA} - R{rB}")
                 self.pc += 3
 
-            # SUBI
-            elif opcode == 0b00001000:
-                reg = self.memory[self.pc + 1]
+            elif opcode == 0b00001011:  # SUBI
+                r = self.memory[self.pc + 1]
                 val = self.memory[self.pc + 2]
-                result = (self.registers[reg] - val) & 0xFF
-                self.registers[reg] = result
-                print(f"[PC={self.pc:03}] SUBI: R{reg} = R{reg} - {val} = {result}")
+                self.registers[r] = (self.registers[r] - val) & 0xFF
+                print(f"[PC={self.pc:03}] SUBI: R{r} -= {val}")
                 self.pc += 3
 
-            # DIV
-            elif opcode == 0b00001001:
-                regA = self.memory[self.pc + 1]
-                regB = self.memory[self.pc + 2]
-                divisor = self.registers[regB]
+            elif opcode == 0b00001100:  # MUL
+                rA = self.memory[self.pc + 1]
+                rB = self.memory[self.pc + 2]
+                self.registers[rA] = (self.registers[rA] * self.registers[rB]) & 0xFF
+                print(f"[PC={self.pc:03}] MUL: R{rA} = R{rA} * R{rB}")
+                self.pc += 3
+
+            elif opcode == 0b00001101:  # DIV
+                rA = self.memory[self.pc + 1]
+                rB = self.memory[self.pc + 2]
+                divisor = self.registers[rB]
                 if divisor == 0:
-                    print(f"[PC={self.pc:03}] DIV: Деление на ноль! R{regB}=0 — пропуск операции")
+                    print(f"[PC={self.pc:03}] DIV: Деление на ноль! Пропуск.")
                 else:
-                    result = (self.registers[regA] // divisor) & 0xFF
-                    self.registers[regA] = result
-                    print(f"[PC={self.pc:03}] DIV: R{regA} = R{regA} // R{regB} = {result}")
+                    self.registers[rA] = (self.registers[rA] // divisor) & 0xFF
+                    print(f"[PC={self.pc:03}] DIV: R{rA} = R{rA} // R{rB}")
                 self.pc += 3
 
-            # MOD
-            elif opcode == 0b00001010:
-                regA = self.memory[self.pc + 1]
-                regB = self.memory[self.pc + 2]
-                divisor = self.registers[regB]
+            elif opcode == 0b00001110:  # MOD
+                rA = self.memory[self.pc + 1]
+                rB = self.memory[self.pc + 2]
+                divisor = self.registers[rB]
                 if divisor == 0:
-                    print(f"[PC={self.pc:03}] MOD: Деление на ноль! R{regB}=0 — пропуск операции")
+                    print(f"[PC={self.pc:03}] MOD: Деление на ноль! Пропуск.")
                 else:
-                    result = (self.registers[regA] % divisor) & 0xFF
-                    self.registers[regA] = result
-                    print(f"[PC={self.pc:03}] MOD: R{regA} = R{regA} % R{regB} = {result}")
+                    self.registers[rA] = (self.registers[rA] % divisor) & 0xFF
+                    print(f"[PC={self.pc:03}] MOD: R{rA} = R{rA} % R{rB}")
                 self.pc += 3
 
-
-            # INC
-            elif opcode == 0b00001011:
-                reg = self.memory[self.pc + 1]
-                self.registers[reg] = (self.registers[reg] + 1) & 0xFF
-                print(f"[PC={self.pc:03}] INC: R{reg} = R{reg} + 1 -> {self.registers[reg]}")
+            elif opcode == 0b00001111:  # INC
+                r = self.memory[self.pc + 1]
+                self.registers[r] = (self.registers[r] + 1) & 0xFF
+                print(f"[PC={self.pc:03}] INC: R{r}++")
                 self.pc += 2
 
-            # DEC
-            elif opcode == 0b00001100:
-                reg = self.memory[self.pc + 1]
-                self.registers[reg] = (self.registers[reg] - 1) & 0xFF
-                print(f"[PC={self.pc:03}] DEC: R{reg} = R{reg} - 1 -> {self.registers[reg]}")
+            elif opcode == 0b00010000:  # DEC
+                r = self.memory[self.pc + 1]
+                self.registers[r] = (self.registers[r] - 1) & 0xFF
+                print(f"[PC={self.pc:03}] DEC: R{r}--")
                 self.pc += 2
 
+            # ====================================================
+            # 3️⃣ Логические операции
+            # ====================================================
+            elif opcode == 0b00010001:  # AND
+                rA = self.memory[self.pc + 1]
+                rB = self.memory[self.pc + 2]
+                self.registers[rA] &= self.registers[rB]
+                print(f"[PC={self.pc:03}] AND: R{rA} = R{rA} AND R{rB}")
+                self.pc += 3
 
-            # JMP
-            elif opcode == 0b00001101:
+            elif opcode == 0b00010010:  # OR
+                rA = self.memory[self.pc + 1]
+                rB = self.memory[self.pc + 2]
+                self.registers[rA] |= self.registers[rB]
+                print(f"[PC={self.pc:03}] OR: R{rA} = R{rA} OR R{rB}")
+                self.pc += 3
+
+            elif opcode == 0b00010011:  # XOR
+                rA = self.memory[self.pc + 1]
+                rB = self.memory[self.pc + 2]
+                self.registers[rA] ^= self.registers[rB]
+                print(f"[PC={self.pc:03}] XOR: R{rA} = R{rA} XOR R{rB}")
+                self.pc += 3
+
+            elif opcode == 0b00010100:  # NOT
+                r = self.memory[self.pc + 1]
+                self.registers[r] = (~self.registers[r]) & 0xFF
+                print(f"[PC={self.pc:03}] NOT: R{r} = NOT R{r}")
+                self.pc += 2
+
+            # ====================================================
+            # 4️⃣ Условия и переходы
+            # ====================================================
+            elif opcode == 0b00011000:  # JMP
                 addr = self.memory[self.pc + 1]
-                print(f"[PC={self.pc:03}] JMP Переход на адрес {addr}")
+                print(f"[PC={self.pc:03}] JMP -> {addr}")
                 self.pc = addr
 
-            # JZ
-            elif opcode == 0b00001110:
-                reg = self.memory[self.pc + 1]
+            elif opcode == 0b00011001:  # JZ
+                r = self.memory[self.pc + 1]
                 addr = self.memory[self.pc + 2]
-                if self.registers[reg] == 0:
-                    print(f"[PC={self.pc:03}] JZ: R{reg} == 0 → Переход на {addr}")
+                if self.registers[r] == 0:
+                    print(f"[PC={self.pc:03}] JZ: R{r}=0 -> {addr}")
                     self.pc = addr
                 else:
-                    print(f"[PC={self.pc:03}] JZ: R{reg} != 0 → Переход не выполнен")
+                    print(f"[PC={self.pc:03}] JZ: R{r}!=0 -> skip")
                     self.pc += 3
 
-            # JNZ
-            elif opcode == 0b00001111:
-                reg = self.memory[self.pc + 1]
+            elif opcode == 0b00011010:  # JNZ
+                r = self.memory[self.pc + 1]
                 addr = self.memory[self.pc + 2]
-                if self.registers[reg] != 0:
-                    print(f"[PC={self.pc:03}] JNZ: R{reg} != 0 → Переход на {addr}")
+                if self.registers[r] != 0:
+                    print(f"[PC={self.pc:03}] JNZ: R{r}!=0 -> {addr}")
                     self.pc = addr
                 else:
-                    print(f"[PC={self.pc:03}] JNZ: R{reg} == 0 → Переход не выполнен")
+                    print(f"[PC={self.pc:03}] JNZ: R{r}=0 -> skip")
                     self.pc += 3
 
-            # STI
-            elif opcode == 0b00010000:
-                reg_src = self.memory[self.pc + 1]
-                reg_addr = self.memory[self.pc + 2]
-                addr = self.registers[reg_addr] & 0xFF
-                val = self.registers[reg_src] & 0xFF
-                self.memory[addr] = val
-                print(f"[PC={self.pc:03}] STI: MEM[R{reg_addr}] <- R{reg_src} ({val})")
-                self.pc += 3
-            # MUL
-            elif opcode == 0b00010001:
-                regA = self.memory[self.pc + 1]
-                regB = self.memory[self.pc + 2]
-                result = (self.registers[regA] * self.registers[regB]) & 0xFF
-                self.registers[regA] = result
-                print(f"[PC={self.pc:03}] MUL: R{regA} = R{regA} * R{regB} = {result}")
-                self.pc += 3
+            # ====================================================
+            # 5️⃣ Остановка
+            # ====================================================
+            elif opcode == 0b11111111:  # HALT
+                print(f"[PC={self.pc:03}] HALT: Программа завершена.")
+                break
 
             else:
+                print(f"[PC={self.pc:03}] Неизвестная команда: {opcode}")
                 self.pc += 1
 
             self.update_console()
-
+            self.all_opcode_count = self.all_opcode_count + 1
             print("Регистры: ", end="")
             for i, val in enumerate(self.registers):
                 print(f"R{i}={val} (0b{val:08b}) ", end="")
             print("\n")
-            time.sleep(0.03)
+        return self.all_opcode_count
 
 
 # Пример программы
 cpu = CPU8Bit(
     [
-        0b00000001, 0b00000000, 0b01001110, 0b00000001, 0b00000001, 0b00000000, 0b00000001, 0b00000010, 0b00000101,
-        0b00000011, 0b00000010, 0b11110001, 0b00000001, 0b00000100, 0b01100100, 0b00000001, 0b00000101, 0b00001010,
-        0b00000001, 0b00000111, 0b01100100, 0b00000001, 0b00000111, 0b01100100, 0b00000001, 0b00000111, 0b01100100,
-        0b00000001, 0b00000111, 0b01100100, 0b00000001, 0b00000111, 0b01100100, 0b00000011, 0b00000001, 0b11110000,
-        0b00000100, 0b00000011, 0b00000001, 0b00001001, 0b00000011, 0b00000100, 0b00000110, 0b00000011, 0b00110111,
-        0b00000011, 0b00000011, 0b11110010, 0b00000100, 0b00000011, 0b00000001, 0b00001010, 0b00000011, 0b00000100,
-        0b00001001, 0b00000011, 0b00000101, 0b00000110, 0b00000011, 0b00110111, 0b00000011, 0b00000011, 0b11110011,
-        0b00000100, 0b00000011, 0b00000001, 0b00001010, 0b00000011, 0b00000101, 0b00000110, 0b00000011, 0b00110111,
-        0b00000011, 0b00000011, 0b11110100, 0b00001100, 0b00000000, 0b00001011, 0b00000001, 0b00001111, 0b00000000,
-        0b00010010, 0b00001101, 0b01010100, 0b00000011, 0b00000001, 0b11110000, 0b11111111
+        0b00000001, 0b00000000, 0b00010001, 0b00000011, 0b00000000, 0b11110000, 0b00000001, 0b00000000, 0b00001110,
+        0b00000011, 0b00000000, 0b11110001, 0b00000001, 0b00000000, 0b00010101, 0b00000011, 0b00000000, 0b11110010,
+        0b00000001, 0b00000000, 0b00010101, 0b00000011, 0b00000000, 0b11110011, 0b00000001, 0b00000000, 0b00011000,
+        0b00000011, 0b00000000, 0b11110100, 0b00000001, 0b00000000, 0b00000000, 0b00000011, 0b00000000, 0b11110101,
+        0b00000001, 0b00000000, 0b00100000, 0b00000011, 0b00000000, 0b11110110, 0b00000001, 0b00000000, 0b00011000,
+        0b00000011, 0b00000000, 0b11110111, 0b00000001, 0b00000000, 0b00011011, 0b00000011, 0b00000000, 0b11111000,
+        0b00000001, 0b00000000, 0b00010101, 0b00000011, 0b00000000, 0b11111001, 0b00000001, 0b00000000, 0b00001101,
+        0b00000011, 0b00000000, 0b11111010, 0b00000001, 0b00000000, 0b00000010, 0b00000011, 0b00000000, 0b11111011,
+        0b11111111
 
     ])
-cpu.run()
+start_time = time.time()
+all_opcode = cpu.run()
+
+end_time = time.time()
+
+duration = end_time - start_time
+ops_per_second = all_opcode / duration
+
+print(f"Всего операций: {all_opcode}")
+print(f"Время выполнения: {duration:.4f} секунд")
+print(f"Операций в секунду: {ops_per_second:.2f}")
