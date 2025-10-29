@@ -7,7 +7,8 @@ class CPU8Bit:
     def __init__(self, program=None):
         self.program = program or []
         self.pc = 0
-        self.registers = [0b00000000] * 10
+        self.registers = [0b00000000] * 8
+        self.stack = []
         if len(self.program) > 256:
             raise ValueError("Ошибка: Программа больше 256 байт!")
         self.memory = self.program + [0b00000000] * (256 - len(self.program))
@@ -260,11 +261,43 @@ class CPU8Bit:
                     print(f"[PC={self.pc:03}] JNZ: R{r}=0 -> skip")
                     self.pc += 3
 
+
+            # ====================================================
+            # 4️⃣ Стек
+            # ====================================================
+
+
+            elif opcode == 0b00011011:  # PUSH
+                r = self.memory[self.pc + 1] & 0xFF
+                if len(self.stack) >= 8:
+                    print(f"[PC={self.pc:03}] PUSH: Стек переполнен. Завершение программы")
+                    self.all_opcode_count += 1
+                    break
+
+                self.stack.append(self.registers[r] & 0xFF)
+                print(f"[PC={self.pc:03}] PUSH: R{r} ({self.registers[r]}) -> stack")
+                self.pc += 2
+
+            elif opcode == 0b00011100:  # POP
+                r = self.memory[self.pc + 1] & 0xFF
+
+                if len(self.stack) == 0:
+                    self.registers[r] = 0
+                    print(f"[PC={self.pc:03}] POP: стек пуст, 0 -> R{r}")
+                    self.pc += 2
+                    continue
+
+                stak_val = self.stack.pop()
+                self.registers[r] = stak_val
+                print(f"[PC={self.pc:03}] POP: {stak_val} -> R{r}")
+                self.pc += 2
+
             # ====================================================
             # 5️⃣ Остановка
             # ====================================================
             elif opcode == 0b11111111:  # HALT
                 print(f"[PC={self.pc:03}] HALT: Программа завершена.")
+                self.all_opcode_count = self.all_opcode_count + 1
                 break
 
             else:
@@ -281,19 +314,7 @@ class CPU8Bit:
 
 
 # Пример программы
-cpu = CPU8Bit(
-    [
-        0b00000001, 0b00000000, 0b00010001, 0b00000011, 0b00000000, 0b11110000, 0b00000001, 0b00000000, 0b00001110,
-        0b00000011, 0b00000000, 0b11110001, 0b00000001, 0b00000000, 0b00010101, 0b00000011, 0b00000000, 0b11110010,
-        0b00000001, 0b00000000, 0b00010101, 0b00000011, 0b00000000, 0b11110011, 0b00000001, 0b00000000, 0b00011000,
-        0b00000011, 0b00000000, 0b11110100, 0b00000001, 0b00000000, 0b00000000, 0b00000011, 0b00000000, 0b11110101,
-        0b00000001, 0b00000000, 0b00100000, 0b00000011, 0b00000000, 0b11110110, 0b00000001, 0b00000000, 0b00011000,
-        0b00000011, 0b00000000, 0b11110111, 0b00000001, 0b00000000, 0b00011011, 0b00000011, 0b00000000, 0b11111000,
-        0b00000001, 0b00000000, 0b00010101, 0b00000011, 0b00000000, 0b11111001, 0b00000001, 0b00000000, 0b00001101,
-        0b00000011, 0b00000000, 0b11111010, 0b00000001, 0b00000000, 0b00000010, 0b00000011, 0b00000000, 0b11111011,
-        0b11111111
-
-    ])
+cpu = CPU8Bit([])
 start_time = time.time()
 all_opcode = cpu.run()
 
