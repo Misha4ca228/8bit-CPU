@@ -317,7 +317,7 @@ class CPU8Bit:
 cpu = CPU8Bit(
     [
 
-     ])
+])
 start_time = time.time()
 all_opcode = cpu.run()
 
