@@ -7,7 +7,7 @@ class CPU8Bit:
     def __init__(self, program=None):
         self.program = program or []
         self.pc = 0
-        self.registers = [0b00000000] * 8
+        self.registers = [0b00000000] * 10
         self.stack = []
         if len(self.program) > 256:
             raise ValueError("Ошибка: Программа больше 256 байт!")
@@ -266,7 +266,6 @@ class CPU8Bit:
             # 4️⃣ Стек
             # ====================================================
 
-
             elif opcode == 0b00011011:  # PUSH
                 r = self.memory[self.pc + 1] & 0xFF
                 if len(self.stack) >= 8:
@@ -309,12 +308,16 @@ class CPU8Bit:
             print("Регистры: ", end="")
             for i, val in enumerate(self.registers):
                 print(f"R{i}={val} (0b{val:08b}) ", end="")
+            # time.sleep(0.1)
             print("\n")
         return self.all_opcode_count
 
 
 # Пример программы
-cpu = CPU8Bit([])
+cpu = CPU8Bit(
+    [
+
+     ])
 start_time = time.time()
 all_opcode = cpu.run()
 
