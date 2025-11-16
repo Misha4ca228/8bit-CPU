@@ -92,35 +92,42 @@ def compile_program(file_path):
         if not line:
             continue
 
-        # 💡 Метка
+        # Метка
         if line.endswith(":"):
-            label_name = line[:-1].strip()
-            if not label_name.isidentifier():
-                raise SyntaxError(f"Неверное имя метки '{label_name}' (строка {line_num})")
-            if label_name in labels:
-                raise SyntaxError(f"Метка '{label_name}' уже определена (строка {line_num})")
-            labels[label_name] = addr
+            label = line[:-1].strip()
+            if not label.isidentifier():
+                raise SyntaxError(f"Недопустимая метка '{label}' (строка {line_num})")
+            if label in labels:
+                raise SyntaxError(f"Метка '{label}' уже существует (строка {line_num})")
+            labels[label] = addr
             continue
 
         if not line.endswith(";"):
-            raise SyntaxError(f"Ошибка синтаксиса (строка {line_num}): строка должна заканчиваться ';'")
+            raise SyntaxError(f"Строка должна заканчиваться ';' (строка {line_num})")
         line = line[:-1].strip()
 
-        # ✅ Поддержка нескольких $ на одной строке
+        # Данные $x, $y
         if "$" in line and not any(op in line.split()[0].upper() for op in opcode_map):
-            parts = [p.strip() for p in line.replace(",", " ").split() if p.strip()]
-            for p in parts:
-                if not p.startswith("$"):
-                    raise SyntaxError(f"Неверная директива данных '{p}' (строка {line_num})")
-                addr += 1
+            parts = [p.strip() for p in line.replace(",", " ").split()]
+            addr += len(parts)
             continue
 
         # Команда
         parts = line.replace(",", " ").split()
         instr = parts[0].upper()
+
         if instr not in opcode_map:
             raise ValueError(f"Неизвестная инструкция '{instr}' (строка {line_num})")
-        addr += 1 + operand_count[instr]
+
+        # обычная инструкция = opcode + операнды
+        # но если здесь есть адрес — нужно +2 байта на адрес
+        count = operand_count[instr]
+
+        # инструкции с адресом требуют 2 байта вместо 1
+        if instr in ("LD", "ST", "JMP", "JZ", "JNZ"):
+            addr += 1 + 1 + 2   # opcode + reg? + 12-бит адрес
+        else:
+            addr += 1 + count
 
     # ---------- ВТОРОЙ ПРОХОД ----------
     bytecode = []
@@ -130,62 +137,102 @@ def compile_program(file_path):
         if not line or line.endswith(":"):
             continue
 
-        # Строка должна заканчиваться ';' — но может содержать много ';' внутри
-        if ";" not in line:
-            raise SyntaxError(f"Ошибка синтаксиса (строка {line_num}): отсутствует ';' в конце инструкции или данных")
-
-        # Разбиваем строку по ';' и обрабатываем каждую часть отдельно
         segments = [seg.strip() for seg in line.split(";") if seg.strip()]
 
         for segment in segments:
-            # Пропускаем пустые строки и комментарии
-            if not segment:
-                continue
 
-            # Обработка нескольких $ на одной строке
+            # Данные
             if "$" in segment and not any(op in segment.split()[0].upper() for op in opcode_map):
-                # поддержка синтаксиса $1, $2, $3
-                data_parts = [p.strip() for p in segment.replace(",", " ").split() if p.strip()]
-                for p in data_parts:
+                parts = [p.strip() for p in segment.replace(",", " ").split()]
+                for p in parts:
                     if not p.startswith("$"):
-                        raise SyntaxError(f"Неверная директива данных '{p}' (строка {line_num})")
-                    val_str = p[1:].strip()
-                    if val_str.startswith(("0x", "0b")):
-                        val = int(val_str, 0)  # поддержка 0x.., 0b..
-                    elif val_str.isdigit():
-                        val = int(val_str)
-                    else:
-                        raise ValueError(f"После '$' должно быть число (строка {line_num})")
+                        raise SyntaxError(f"Неверная директива '{p}' (строка {line_num})")
+                    val = int(p[1:], 0)
                     if not (0 <= val <= 255):
-                        raise ValueError(f"Значение {val} вне диапазона 0–255 (строка {line_num})")
+                        raise ValueError(f"Данные {val} вне диапазона 0–255")
                     bytecode.append(val)
                 continue
 
-            # Обычная инструкция
+            # Инструкция
             parts = segment.replace(",", " ").split()
             instr = parts[0].upper()
-
-            if instr not in opcode_map:
-                raise ValueError(f"Неизвестная инструкция '{instr}' (строка {line_num})")
-
             bytecode.append(opcode_map[instr])
 
-            for operand in parts[1:]:
+            operands = parts[1:]
+
+            # --- Инструкции с 12-битным адресом ---
+            if instr == "LD" or instr == "ST":
+                if len(operands) != 2:
+                    raise SyntaxError(f"{instr} требует 2 операнда (строка {line_num})")
+
+                # первый = регистр
+                reg = int(operands[0])
+                bytecode.append(reg)
+
+                # второй = адрес
+                addr_val = labels.get(operands[1], None)
+                if addr_val is None:
+                    addr_val = int(operands[1])
+
+                if not (0 <= addr_val <= 4095):
+                    raise ValueError(f"Адрес {addr_val} вне диапазона 0–4095")
+
+                high = (addr_val >> 8) & 0x0F
+                low = addr_val & 0xFF
+
+                bytecode.append(high)
+                bytecode.append(low)
+                continue
+
+            if instr == "JMP":
+                if len(operands) != 1:
+                    raise SyntaxError(f"JMP требует 1 операнд (строка {line_num})")
+
+                addr_val = labels.get(operands[0], None)
+                if addr_val is None:
+                    addr_val = int(operands[0])
+
+                high = (addr_val >> 8) & 0x0F
+                low = addr_val & 0xFF
+
+                bytecode.append(high)
+                bytecode.append(low)
+                continue
+
+            if instr in ("JZ", "JNZ"):
+                if len(operands) != 2:
+                    raise SyntaxError(f"{instr} требует 2 операнда (строка {line_num})")
+
+                reg = int(operands[0])
+                bytecode.append(reg)
+
+                addr_val = labels.get(operands[1], None)
+                if addr_val is None:
+                    addr_val = int(operands[1])
+
+                high = (addr_val >> 8) & 0x0F
+                low = addr_val & 0xFF
+
+                bytecode.append(high)
+                bytecode.append(low)
+                continue
+
+            # --- Обычные инструкции ---
+            for operand in operands:
                 if operand in labels:
                     value = labels[operand]
-                elif operand.isdigit():
-                    value = int(operand)
                 else:
-                    raise ValueError(f"Неизвестный операнд '{operand}' (строка {line_num})")
+                    value = int(operand)
 
                 if not (0 <= value <= 255):
-                    raise ValueError(f"Операнд {value} вне диапазона 0–255 (строка {line_num})")
+                    raise ValueError(f"Операнд {value} вне диапазона 0–255")
                 bytecode.append(value)
 
-    if len(bytecode) > 256:
-        raise ValueError("Скомпилированная программа слишком большая (макс 256 байт)")
+    if len(bytecode) > 4096:
+        raise ValueError("Программа слишком большая (максимум 4096 байт)")
 
     return bytecode
+
 
 
 

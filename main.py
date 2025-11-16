@@ -9,9 +9,10 @@ class CPU8Bit:
         self.pc = 0
         self.registers = [0b00000000] * 10
         self.stack = []
-        if len(self.program) > 256:
-            raise ValueError("Ошибка: Программа больше 256 байт!")
-        self.memory = self.program + [0b00000000] * (256 - len(self.program))
+        if len(self.program) > 4096:
+            raise ValueError("Ошибка: Программа больше 4096 байт (4) Кбайт!")
+
+        self.memory = self.program + [0] * (4096 - len(self.program))
 
         self.console_window = None
         self.console_text = None
@@ -78,6 +79,11 @@ class CPU8Bit:
             self.console_text.delete("1.0", tk.END)
             self.console_text.insert(tk.END, text)
 
+    def read_addr12(self, pos):
+        high = self.memory[pos + 2] & 0x0F  # 4 бита
+        low = self.memory[pos + 3]
+        return (high << 8) | low
+
     def run(self):
         self.start_console()
         self.running = True
@@ -104,17 +110,17 @@ class CPU8Bit:
 
             elif opcode == 0b00000010:  # LD
                 r = self.memory[self.pc + 1]
-                addr = self.memory[self.pc + 2]
-                self.registers[r] = self.memory[addr] & 0xFF
-                print(f"[PC={self.pc:03}] LD: R{r} <- MEM[{addr}] ({self.registers[r]})")
-                self.pc += 3
+                addr = self.read_addr12(self.pc)
+                self.registers[r] = self.memory[addr]
+                print(f"[PC={self.pc:03}] LD: R{r} <- MEM[{addr}]")
+                self.pc += 4
 
             elif opcode == 0b00000011:  # ST
                 r = self.memory[self.pc + 1]
-                addr = self.memory[self.pc + 2]
-                self.memory[addr] = self.registers[r] & 0xFF
-                print(f"[PC={self.pc:03}] ST: MEM[{addr}] <- R{r} ({self.registers[r]})")
-                self.pc += 3
+                addr = self.read_addr12(self.pc)
+                self.memory[addr] = self.registers[r]
+                print(f"[PC={self.pc:03}] ST: MEM[{addr}] <- R{r}")
+                self.pc += 4
 
             elif opcode == 0b00000100:  # MOV
                 rA = self.memory[self.pc + 1]
@@ -126,9 +132,9 @@ class CPU8Bit:
             elif opcode == 0b00000101:  # STI
                 r_src = self.memory[self.pc + 1]
                 r_addr = self.memory[self.pc + 2]
-                addr = self.registers[r_addr] & 0xFF
-                self.memory[addr] = self.registers[r_src] & 0xFF
-                print(f"[PC={self.pc:03}] STI: MEM[R{r_addr}] <- R{r_src}")
+                addr = self.registers[r_addr] & 0x0FFF
+                self.memory[addr] = self.registers[r_src]
+                print(f"[PC={self.pc:04}] STI: MEM[R{r_addr}]({addr}) <- R{r_src}")
                 self.pc += 3
 
             # ====================================================
@@ -237,30 +243,27 @@ class CPU8Bit:
             # 4️⃣ Условия и переходы
             # ====================================================
             elif opcode == 0b00011000:  # JMP
-                addr = self.memory[self.pc + 1]
+                addr = self.read_addr12(self.pc)
                 print(f"[PC={self.pc:03}] JMP -> {addr}")
                 self.pc = addr
 
             elif opcode == 0b00011001:  # JZ
                 r = self.memory[self.pc + 1]
-                addr = self.memory[self.pc + 2]
+                addr = self.read_addr12(self.pc)
                 if self.registers[r] == 0:
-                    print(f"[PC={self.pc:03}] JZ: R{r}=0 -> {addr}")
+                    print(f"[PC={self.pc:03}] JZ -> {addr}")
                     self.pc = addr
                 else:
-                    print(f"[PC={self.pc:03}] JZ: R{r}!=0 -> skip")
-                    self.pc += 3
+                    self.pc += 4
 
             elif opcode == 0b00011010:  # JNZ
                 r = self.memory[self.pc + 1]
-                addr = self.memory[self.pc + 2]
+                addr = self.read_addr12(self.pc)
                 if self.registers[r] != 0:
-                    print(f"[PC={self.pc:03}] JNZ: R{r}!=0 -> {addr}")
+                    print(f"[PC={self.pc:03}] JNZ -> {addr}")
                     self.pc = addr
                 else:
-                    print(f"[PC={self.pc:03}] JNZ: R{r}=0 -> skip")
-                    self.pc += 3
-
+                    self.pc += 4
 
             # ====================================================
             # 4️⃣ Стек
@@ -316,8 +319,13 @@ class CPU8Bit:
 # Пример программы
 cpu = CPU8Bit(
     [
+        0b00000001, 0b00000000, 0b01001101, 0b00000011, 0b00000000, 0b00000001, 0b00101100, 0b00000001, 0b00000000,
+        0b01111011, 0b00000011, 0b00000000, 0b00000001, 0b11110100, 0b00000001, 0b00000000, 0b00101010, 0b00000011,
+        0b00000000, 0b00000100, 0b00000000, 0b00000010, 0b00000001, 0b00000001, 0b11110100, 0b00001011, 0b00000001,
+        0b01111011, 0b00011001, 0b00000001, 0b00000000, 0b00100100, 0b00011000, 0b00000000, 0b00100101, 0b11111111,
+        0b11111111
 
-])
+    ])
 start_time = time.time()
 all_opcode = cpu.run()
 
