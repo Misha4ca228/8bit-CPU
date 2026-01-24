@@ -7,12 +7,14 @@ class CPU8Bit:
     def __init__(self, program=None):
         self.program = program or []
         self.pc = 0
-        self.registers = [0b00000000] * 1000
-        self.stack = []
-        if len(self.program) > 4096:
-            raise ValueError("Ошибка: Программа больше 4096 байт (4) Кбайт!")
+        self.STACK_START = 0xFFE0  # 65504
+        self.STACK_END = 0xFFEF  # 65519
+        self.SP = self.STACK_END  # Stack Pointer (растёт вниз)
+        self.registers = [0b00000000] * 10
+        if len(self.program) > 65536:
+            raise ValueError("Ошибка: Программа больше 65536 байт (64) Кбайт!")
 
-        self.memory = self.program + [0] * (4096 - len(self.program))
+        self.memory = self.program + [0] * (65536 - len(self.program))
 
         self.console_window = None
         self.console_text = None
@@ -79,9 +81,9 @@ class CPU8Bit:
             self.console_text.delete("1.0", tk.END)
             self.console_text.insert(tk.END, text)
 
-    def read_addr12(self, pos):
-        high = self.memory[pos + 2] & 0x0F  # 4 бита
-        low = self.memory[pos + 3]
+    def read_addr(self, pos):
+        high = self.memory[pos + 2] & 0xFF
+        low = self.memory[pos + 3] & 0xFF
         return (high << 8) | low
 
     def run(self):
@@ -110,14 +112,14 @@ class CPU8Bit:
 
             elif opcode == 0b00000010:  # LD
                 r = self.memory[self.pc + 1]
-                addr = self.read_addr12(self.pc)
+                addr = self.read_addr(self.pc)
                 self.registers[r] = self.memory[addr]
                 print(f"[PC={self.pc:03}] LD: R{r} <- MEM[{addr}]")
                 self.pc += 4
 
             elif opcode == 0b00000011:  # ST
                 r = self.memory[self.pc + 1]
-                addr = self.read_addr12(self.pc)
+                addr = self.read_addr(self.pc)
                 self.memory[addr] = self.registers[r]
                 print(f"[PC={self.pc:03}] ST: MEM[{addr}] <- R{r}")
                 self.pc += 4
@@ -130,10 +132,10 @@ class CPU8Bit:
                 self.pc += 3
 
             elif opcode == 0b00000101:  # STI
-                r_src = self.memory[self.pc + 1]
-                r_addr = self.memory[self.pc + 2]
-                addr = self.registers[r_addr] & 0x0FFF
-                self.memory[addr] = self.registers[r_src]
+                r_src = self.memory[self.pc + 1] & 0xFF
+                r_addr = self.memory[self.pc + 2] & 0xFF
+                addr = self.registers[r_addr] & 0xFF
+                self.memory[addr] = self.registers[r_src] & 0xFF
                 print(f"[PC={self.pc:04}] STI: MEM[R{r_addr}]({addr}) <- R{r_src}")
                 self.pc += 3
 
@@ -243,13 +245,13 @@ class CPU8Bit:
             # 4️⃣ Условия и переходы
             # ====================================================
             elif opcode == 0b00011000:  # JMP
-                addr = self.read_addr12(self.pc)
+                addr = self.read_addr(self.pc)
                 print(f"[PC={self.pc:03}] JMP -> {addr}")
                 self.pc = addr
 
             elif opcode == 0b00011001:  # JZ
                 r = self.memory[self.pc + 1]
-                addr = self.read_addr12(self.pc)
+                addr = self.read_addr(self.pc)
                 if self.registers[r] == 0:
                     print(f"[PC={self.pc:03}] JZ -> {addr}")
                     self.pc = addr
@@ -258,7 +260,7 @@ class CPU8Bit:
 
             elif opcode == 0b00011010:  # JNZ
                 r = self.memory[self.pc + 1]
-                addr = self.read_addr12(self.pc)
+                addr = self.read_addr(self.pc)
                 if self.registers[r] != 0:
                     print(f"[PC={self.pc:03}] JNZ -> {addr}")
                     self.pc = addr
@@ -271,28 +273,28 @@ class CPU8Bit:
 
             elif opcode == 0b00011011:  # PUSH
                 r = self.memory[self.pc + 1] & 0xFF
-                if len(self.stack) >= 8:
-                    print(f"[PC={self.pc:03}] PUSH: Стек переполнен. Завершение программы")
-                    self.all_opcode_count += 1
+                if self.SP < self.STACK_START:
+                    print(f"[PC={self.pc:03}] PUSH: стек переполнен")
                     break
-
-                self.stack.append(self.registers[r] & 0xFF)
-                print(f"[PC={self.pc:03}] PUSH: R{r} ({self.registers[r]}) -> stack")
+                self.memory[self.SP] = self.registers[r] & 0xFF
+                print(f"[PC={self.pc:03}] PUSH: MEM[{self.SP}] <- R{r}")
+                self.SP -= 1
                 self.pc += 2
+
 
             elif opcode == 0b00011100:  # POP
                 r = self.memory[self.pc + 1] & 0xFF
-
-                if len(self.stack) == 0:
+                if self.SP == self.STACK_END:
                     self.registers[r] = 0
                     print(f"[PC={self.pc:03}] POP: стек пуст, 0 -> R{r}")
                     self.pc += 2
                     continue
-
-                stak_val = self.stack.pop()
-                self.registers[r] = stak_val
-                print(f"[PC={self.pc:03}] POP: {stak_val} -> R{r}")
+                self.SP += 1
+                val = self.memory[self.SP]
+                self.registers[r] = val & 0xFF
+                print(f"[PC={self.pc:03}] POP: R{r} <- MEM[{self.SP}] ({val})")
                 self.pc += 2
+
 
             # ====================================================
             # 5️⃣ Остановка
@@ -311,7 +313,7 @@ class CPU8Bit:
             print("Регистры: ", end="")
             for i, val in enumerate(self.registers):
                 print(f"R{i}={val} (0b{val:08b}) ", end="")
-                #time.sleep(0.1)
+                time.sleep(0.1)
             print("\n")
         return self.all_opcode_count
 
@@ -319,7 +321,9 @@ class CPU8Bit:
 # Пример программы
 cpu = CPU8Bit(
     [
-
+        0b00000001, 0b00000000, 0b00010001, 0b00000001, 0b00000001, 0b00001010, 0b00000001, 0b00000010, 0b00001011,
+        0b00011011, 0b00000001, 0b00011011, 0b00000010, 0b00011100, 0b00000011, 0b00011100, 0b00000100, 0b00000011,
+        0b00000011, 0b11111111, 0b11110000, 0b00000011, 0b00000100, 0b11111111, 0b11110001, 0b11111111
 
     ])
 start_time = time.time()
