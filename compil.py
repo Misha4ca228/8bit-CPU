@@ -1,249 +1,356 @@
-opcode_map = {
-    # 1) Память и регистры
-    "LDI":  0b00000001,  # [op][r][imm8]
-    "LD":   0b00000010,  # [op][r][hi][lo]
-    "ST":   0b00000011,  # [op][r][hi][lo]
-    "MOV":  0b00000100,  # [op][rA][rB]
-    "STI":  0b00000101,  # [op][r_src][r_addr]  (zero-page indirect)
+import re
+from dataclasses import dataclass
+from pathlib import Path
 
-    # 2) Арифметика
-    "ADD":  0b00001000,  # [op][rA][rB]
-    "ADDI": 0b00001001,  # [op][r][imm8]
-    "SUB":  0b00001010,  # [op][rA][rB]
-    "SUBI": 0b00001011,  # [op][r][imm8]
-    "MUL":  0b00001100,  # [op][rA][rB]
-    "DIV":  0b00001101,  # [op][rA][rB]
-    "MOD":  0b00001110,  # [op][rA][rB]
-    "INC":  0b00001111,  # [op][r]
-    "DEC":  0b00010000,  # [op][r]
+# =========================
+#  ASM -> bytes for your CPU8Bit
+# =========================
 
-    # 3) Логика
-    "AND":  0b00010001,  # [op][rA][rB]
-    "OR":   0b00010010,  # [op][rA][rB]
-    "XOR":  0b00010011,  # [op][rA][rB]
-    "NOT":  0b00010100,  # [op][r]
+OP = {
+    "LDI":   0b00000001,
+    "LDI16": 0b00000010,
+    "MOV":   0b00000011,
+    "LDM":   0b00000100,
+    "STM":   0b00000101,
+    "LDR":   0b00000110,
+    "STR":   0b00000111,
 
-    # 4) Переходы (16-bit адрес)
-    "JMP":  0b00011000,  # [op][hi][lo]
-    "JZ":   0b00011001,  # [op][r][hi][lo]
-    "JNZ":  0b00011010,  # [op][r][hi][lo]
+    "ADD":   0b00001000,
+    "ADC":   0b00001001,
+    "SUB":   0b00001010,
+    "SBC":   0b00001011,
+    "INC":   0b00001100,
+    "DEC":   0b00001101,
+    "CMP":   0b00001110,
 
-    # 5) Стек
-    "PUSH": 0b00011011,  # [op][r]
-    "POP":  0b00011100,  # [op][r]
+    "AND":   0b00001111,
+    "OR":    0b00010000,
+    "XOR":   0b00010001,
+    "NOT":   0b00010010,
+    "SHL":   0b00010011,
+    "SHR":   0b00010100,
 
-    # 6) Стоп
-    "HALT": 0b11111111,  # [op]
+    "JMP":   0b00010101,
+    "JZ":    0b00010110,
+    "JNZ":   0b00010111,
+    "JC":    0b00011000,
+    "JNC":   0b00011001,
+
+    "PUSH":  0b00011010,
+    "POP":   0b00011011,
+    "PUSH16":0b00011100,
+    "POP16": 0b00011101,
+    "CALL":  0b00011110,
+    "RET":   0b00011111,
+
+    "IN":    0b00100000,
+    "OUT":   0b00100001,
+
+    "HALT":  0b11111111,
 }
 
-operand_count = {
-    "LDI":  2,
-    "LD":   2,
-    "ST":   2,
-    "MOV":  2,
-    "STI":  2,
+# Регистр-алиасы (поменяй под себя)
+REG = {f"R{i}": i for i in range(16)}
+REG.update({
+    "A": 0,
+    "B": 1,
+    "C": 2,
+    "D": 3,
+    "E": 4,
+    "F": 5,
+    "G": 6,
+    "H": 7,
+    "I": 8,
+    "J": 9,
+    "K": 10,
+    "L": 11,
+    "M": 12,
+    "N": 13,
+    "O": 14,
+    "P": 15,
+})
 
-    "ADD":  2,
-    "ADDI": 2,
-    "SUB":  2,
-    "SUBI": 2,
-    "MUL":  2,
-    "DIV":  2,
-    "MOD":  2,
-    "INC":  1,
-    "DEC":  1,
+COMMENT_RE = re.compile(r"(;|#|//).*?$")
 
-    "AND":  2,
-    "OR":   2,
-    "XOR":  2,
-    "NOT":  1,
+@dataclass
+class SrcLine:
+    lineno: int
+    raw: str
+    text: str
+    addr: int = 0
 
-    "JMP":  1,
-    "JZ":   2,
-    "JNZ":  2,
+def _strip_comment(s: str) -> str:
+    return COMMENT_RE.sub("", s).strip()
 
-    "PUSH": 1,
-    "POP":  1,
+def _tokens(s: str):
+    return [t for t in re.split(r"[,\s]+", s.strip()) if t]
 
-    "HALT": 0
-}
+def parse_number(tok: str) -> int:
+    t = tok.strip().lower().replace("_", "")
+    sign = 1
+    if t.startswith("-"):
+        sign = -1
+        t = t[1:]
 
-# Архитектурные ограничения
-MEM_SIZE = 65536
-STACK_START = 0xFFE0
-VIDEO_START = 0xFFF0
-MAX_PROGRAM_SIZE = STACK_START  # можно использовать всё до 0xFFE0 (не включая)
+    if t.startswith("0x"):
+        v = int(t[2:], 16)
+    elif t.endswith("h") and t[:-1]:
+        v = int(t[:-1], 16)
+    elif t.startswith("0b"):
+        v = int(t[2:], 2)
+    elif t.endswith("b") and t[:-1]:
+        body = t[:-1]
+        if not all(c in "01" for c in body):
+            raise ValueError(f"Некорректное двоичное число: {tok}")
+        v = int(body, 2)
+    else:
+        v = int(t, 10)
 
+    return sign * v
 
-def _parse_int(token: str, line_num: int) -> int:
+def parse_reg(tok: str) -> int:
+    u = tok.upper()
+    if u not in REG:
+        raise ValueError(f"Неизвестный регистр: {tok}")
+    return REG[u]
+
+def parse_reg_pair(tok: str):
     """
-    int(token, 0) позволяет:
-    123, 0xFF, 0b1010
+    XX = HI,LO (два обычных регистра).
+    Пример: AH -> (A,H)
+    Также допускается R0R1.
     """
-    try:
-        return int(token, 0)
-    except ValueError:
-        raise SyntaxError(f"Неверное число '{token}' (строка {line_num})")
+    u = tok.upper()
 
+    m = re.fullmatch(r"(R(?:[0-9]|1[0-5]))(R(?:[0-9]|1[0-5]))", u)
+    if m:
+        return parse_reg(m.group(1)), parse_reg(m.group(2))
 
-def _resolve_label_or_number(token: str, labels: dict, line_num: int) -> int:
-    if token in labels:
-        return labels[token]
-    return _parse_int(token, line_num)
+    if len(u) == 2:
+        hi, lo = u[0], u[1]
+        if hi not in REG or lo not in REG:
+            raise ValueError(f"Пара {tok}: оба символа должны быть регистрами")
+        return parse_reg(hi), parse_reg(lo)
 
+    raise ValueError(f"Некорректная пара регистров: {tok}")
 
-def _emit_addr16(bytecode: list[int], addr_val: int, line_num: int):
-    if not (0 <= addr_val <= 0xFFFF):
-        raise ValueError(f"Адрес {addr_val} вне диапазона 0–65535 (строка {line_num})")
-    hi = (addr_val >> 8) & 0xFF
-    lo = addr_val & 0xFF
-    bytecode.append(hi)
-    bytecode.append(lo)
+def parse_value(tok: str, labels: dict) -> int:
+    if re.fullmatch(r"[A-Za-z_]\w*", tok):
+        if tok not in labels:
+            raise ValueError(f"Неизвестная метка: {tok}")
+        return labels[tok]
+    return parse_number(tok)
 
+def emit_u8(out, v: int):
+    out.append(v & 0xFF)
 
-def compile_program(file_path: str) -> list[int]:
-    with open(file_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+def emit_u16_lohi(out, v: int):
+    v &= 0xFFFF
+    out.append(v & 0xFF)         # LO
+    out.append((v >> 8) & 0xFF)  # HI
 
-    # ---------- ПЕРВЫЙ ПРОХОД: считаем адреса меток ----------
-    labels: dict[str, int] = {}
-    addr = 0
+def estimate_len(tokens):
+    if not tokens:
+        return 0
+    head = tokens[0].upper()
 
-    for line_num, line in enumerate(lines, start=1):
-        line = line.split("#")[0].strip()
-        if not line:
+    if head == "$":
+        n = 0
+        for t in tokens[1:]:
+            # метка может означать 16бит, считаем как 2
+            if re.fullmatch(r"[A-Za-z_]\w*", t):
+                n += 2
+            else:
+                v = parse_number(t)
+                n += 2 if (v < 0 or v > 0xFF) else 1
+        return n
+
+    if head in ("HALT", "RET"):
+        return 1
+
+    if head in ("INC", "DEC", "NOT", "SHL", "SHR", "PUSH", "POP"):
+        return 2
+
+    if head in ("ADD","ADC","SUB","SBC","CMP","AND","OR","XOR","MOV","IN","OUT"):
+        return 3
+
+    if head in ("JMP","JZ","JNZ","JC","JNC","CALL"):
+        return 3
+
+    if head == "LDI":
+        return 3
+
+    if head == "LDI16":
+        return 5
+
+    if head in ("LDM","STM","LDR","STR"):
+        return 4
+
+    if head in ("PUSH16","POP16"):
+        return 3
+
+    raise ValueError(f"Неизвестная инструкция: {tokens[0]}")
+
+def assemble_text(asm_text: str):
+    # ---- read lines ----
+    raw_lines = asm_text.splitlines()
+    lines = []
+    for i, raw in enumerate(raw_lines, start=1):
+        s = _strip_comment(raw)
+        if not s:
+            continue
+        lines.append(SrcLine(lineno=i, raw=raw, text=s))
+
+    # ---- pass 1: labels ----
+    labels = {}
+    pc = 0
+    for ln in lines:
+        text = ln.text
+
+        while True:
+            m = re.match(r"^([A-Za-z_]\w*):", text)
+            if not m:
+                break
+            name = m.group(1)
+            if name in labels:
+                raise ValueError(f"Повтор метки {name} (строка {ln.lineno})")
+            labels[name] = pc
+            text = text[m.end():].strip()
+            ln.text = text
+            if not text:
+                break
+
+        ln.addr = pc
+        if not ln.text:
             continue
 
-        # Метка
-        if line.endswith(":"):
-            label = line[:-1].strip()
-            if not label.isidentifier():
-                raise SyntaxError(f"Недопустимая метка '{label}' (строка {line_num})")
-            if label in labels:
-                raise SyntaxError(f"Метка '{label}' уже существует (строка {line_num})")
-            labels[label] = addr
+        pc = (pc + estimate_len(_tokens(ln.text))) & 0xFFFF
+
+    # ---- pass 2: emit ----
+    out = []
+    for ln in lines:
+        if not ln.text:
+            continue
+        tok = _tokens(ln.text)
+        if not tok:
             continue
 
-        if not line.endswith(";"):
-            raise SyntaxError(f"Строка должна заканчиваться ';' (строка {line_num})")
-        line = line[:-1].strip()
-        if not line:
+        ins = tok[0].upper()
+
+        if ins == "$":
+            for t in tok[1:]:
+                v = parse_value(t, labels)
+                if v < 0 or v > 0xFF:
+                    emit_u16_lohi(out, v)  # lo,hi
+                else:
+                    emit_u8(out, v)
             continue
 
-        # Данные: $x, $y ... (байты 0..255)
-        if "$" in line and not any(op == line.split()[0].upper() for op in opcode_map):
-            parts = [p.strip() for p in line.replace(",", " ").split()]
-            addr += len(parts)
+        if ins not in OP:
+            raise ValueError(f"Неизвестная инструкция {ins} (строка {ln.lineno})")
+
+        emit_u8(out, OP[ins])
+
+        if ins in ("HALT","RET"):
             continue
 
-        # Инструкция
-        parts = line.replace(",", " ").split()
-        instr = parts[0].upper()
+        elif ins == "LDI":
+            r = parse_reg(tok[1])
+            imm = parse_value(tok[2], labels)
+            emit_u8(out, r)
+            emit_u8(out, imm)
 
-        if instr not in opcode_map:
-            raise ValueError(f"Неизвестная инструкция '{instr}' (строка {line_num})")
+        elif ins == "LDI16":
+            hi, lo = parse_reg_pair(tok[1])
+            imm16 = parse_value(tok[2], labels)
+            emit_u8(out, hi)
+            emit_u8(out, lo)
+            emit_u16_lohi(out, imm16)
 
-        # Размер инструкции в байтах
-        if instr in ("LD", "ST", "JZ", "JNZ"):
-            # opcode + reg + addr16
-            addr += 1 + 1 + 2
-        elif instr == "JMP":
-            # opcode + addr16 (без регистра)
-            addr += 1 + 2
+        elif ins == "MOV":
+            emit_u8(out, parse_reg(tok[1]))
+            emit_u8(out, parse_reg(tok[2]))
+
+        elif ins == "LDM":
+            emit_u8(out, parse_reg(tok[1]))
+            emit_u16_lohi(out, parse_value(tok[2], labels))
+
+        elif ins == "STM":
+            emit_u16_lohi(out, parse_value(tok[1], labels))
+            emit_u8(out, parse_reg(tok[2]))
+
+        elif ins == "LDR":
+            emit_u8(out, parse_reg(tok[1]))
+            emit_u8(out, parse_reg(tok[2]))
+            emit_u8(out, parse_reg(tok[3]))
+
+        elif ins == "STR":
+            emit_u8(out, parse_reg(tok[1]))
+            emit_u8(out, parse_reg(tok[2]))
+            emit_u8(out, parse_reg(tok[3]))
+
+        elif ins in ("ADD","ADC","SUB","SBC","CMP","AND","OR","XOR"):
+            emit_u8(out, parse_reg(tok[1]))
+            emit_u8(out, parse_reg(tok[2]))
+
+        elif ins in ("INC","DEC","NOT","SHL","SHR","PUSH","POP"):
+            emit_u8(out, parse_reg(tok[1]))
+
+        elif ins in ("JMP","JZ","JNZ","JC","JNC","CALL"):
+            emit_u16_lohi(out, parse_value(tok[1], labels))
+
+        elif ins == "IN":
+            emit_u8(out, parse_reg(tok[1]))
+            emit_u8(out, parse_value(tok[2], labels))
+
+        elif ins == "OUT":
+            emit_u8(out, parse_value(tok[1], labels))
+            emit_u8(out, parse_reg(tok[2]))
+
+        elif ins in ("PUSH16", "POP16"):
+            # PUSH16 HI LO  или  PUSH16 HL (пара)
+            if len(tok) == 2:
+                hi, lo = parse_reg_pair(tok[1])  # например AH
+            else:
+                hi, lo = parse_reg(tok[1]), parse_reg(tok[2])  # например A H
+            emit_u8(out, hi)
+            emit_u8(out, lo)
+
+
         else:
-            # opcode + операнды-байты
-            addr += 1 + operand_count[instr]
+            raise ValueError(f"Кодирование не реализовано для {ins} (строка {ln.lineno})")
 
-    # ---------- ВТОРОЙ ПРОХОД: собираем байткод ----------
-    bytecode: list[int] = []
+    return out, labels
 
-    for line_num, line in enumerate(lines, start=1):
-        line = line.split("#")[0].strip()
-        if not line or line.endswith(":"):
-            continue
+def assemble_file(asm_path: str, bin_path: str | None = None, encoding: str = "utf-8"):
+    asm_path = str(asm_path)
+    text = Path(asm_path).read_text(encoding=encoding)
 
-        segments = [seg.strip() for seg in line.split(";") if seg.strip()]
+    program, labels = assemble_text(text)
 
-        for segment in segments:
-            # Данные ($..): байты
-            if "$" in segment and not any(op == segment.split()[0].upper() for op in opcode_map):
-                parts = [p.strip() for p in segment.replace(",", " ").split()]
-                for p in parts:
-                    if not p.startswith("$"):
-                        raise SyntaxError(f"Неверная директива '{p}' (строка {line_num})")
-                    val = _parse_int(p[1:], line_num)
-                    if not (0 <= val <= 255):
-                        raise ValueError(f"Данные {val} вне диапазона 0–255 (строка {line_num})")
-                    bytecode.append(val & 0xFF)
-                continue
+    if bin_path:
+        with open(bin_path, "w", encoding="utf-8") as f:
+            f.write("[\n")
+            for i, b in enumerate(program):
+                # записываем байт как 0bXXXXXXXX
+                f.write(f"  0b{b:08b}")
 
-            # Инструкция
-            parts = segment.replace(",", " ").split()
-            instr = parts[0].upper()
-            if instr not in opcode_map:
-                raise ValueError(f"Неизвестная инструкция '{instr}' (строка {line_num})")
+                # запятая после каждого байта кроме последнего
+                if i != len(program) - 1:
+                    f.write(",")
 
-            bytecode.append(opcode_map[instr])
-            operands = parts[1:]
+                f.write("\n")
+            f.write("]\n")
 
-            # LD/ST: [op][r][hi][lo]
-            if instr in ("LD", "ST"):
-                if len(operands) != 2:
-                    raise SyntaxError(f"{instr} требует 2 операнда (строка {line_num})")
-
-                reg = _parse_int(operands[0], line_num)
-                if not (0 <= reg <= 255):
-                    raise ValueError(f"Регистр {reg} вне диапазона 0–255 (строка {line_num})")
-                bytecode.append(reg & 0xFF)
-
-                addr_val = _resolve_label_or_number(operands[1], labels, line_num)
-                _emit_addr16(bytecode, addr_val, line_num)
-                continue
-
-            # JMP: [op][hi][lo]
-            if instr == "JMP":
-                if len(operands) != 1:
-                    raise SyntaxError(f"JMP требует 1 операнд (строка {line_num})")
-
-                addr_val = _resolve_label_or_number(operands[0], labels, line_num)
-                _emit_addr16(bytecode, addr_val, line_num)
-                continue
-
-            # JZ/JNZ: [op][r][hi][lo]
-            if instr in ("JZ", "JNZ"):
-                if len(operands) != 2:
-                    raise SyntaxError(f"{instr} требует 2 операнда (строка {line_num})")
-
-                reg = _parse_int(operands[0], line_num)
-                if not (0 <= reg <= 255):
-                    raise ValueError(f"Регистр {reg} вне диапазона 0–255 (строка {line_num})")
-                bytecode.append(reg & 0xFF)
-
-                addr_val = _resolve_label_or_number(operands[1], labels, line_num)
-                _emit_addr16(bytecode, addr_val, line_num)
-                continue
-
-            # Остальные инструкции: все операнды = байты (0..255) или метки (НО метка -> адрес, но тут должен влезть в байт)
-            expected = operand_count[instr]
-            if len(operands) != expected:
-                raise SyntaxError(f"{instr} требует {expected} операнд(а/ов) (строка {line_num})")
-
-            for operand in operands:
-                value = _resolve_label_or_number(operand, labels, line_num)
-                if not (0 <= value <= 255):
-                    raise ValueError(f"Операнд {value} вне диапазона 0–255 (строка {line_num})")
-                bytecode.append(value & 0xFF)
-
-    # --- ограничения размера ---
-    if len(bytecode) > MAX_PROGRAM_SIZE:
-        raise ValueError(f"Программа слишком большая (максимум {MAX_PROGRAM_SIZE} байт)")
-
-    return bytecode
+    return program, labels
 
 
+
+
+# =========================
+# CLI example
+# =========================
 if __name__ == "__main__":
-    bytecode = compile_program("program.txt")
-    print(f"\nРазмер программы: {len(bytecode)} байт")
-    print(f"Свободно: {MAX_PROGRAM_SIZE - len(bytecode)} байт\n")
-    print("Байт-код:")
-    print(", ".join(f"0b{val:08b}" for val in bytecode))
+    prog, labels = assemble_file("program_asm.txt", "program_b.txt")
+    print("Wrote program.bin, size:", len(prog))
+    print("Labels:", labels)
