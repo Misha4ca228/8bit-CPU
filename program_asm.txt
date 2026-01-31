@@ -1,29 +1,37 @@
 ; ===== GENERATED ASM (HighLang -> ASM) =====
 
-LDI A, 10
-STM i, A
-while_begin_0:
-LDM A, i
-LDI B, 0
-CMP A, B
-JC while_end_1
-JZ while_end_1
-LDM A, i
-STM numchr, A
-LDM A, numchr
-LDI B, 56
-SUB A, B
-STM numchr, A
-LDM A, numchr
-STM 65520, A
-LDM A, i
-DEC A
-STM i, A
-JMP while_begin_0
-while_end_1:
+JMP __start
+
+; ===== FUNCTIONS =====
+inc:
+POP16 OP
+POP A
+STM __inc__a, A
+LDM A, __inc__a
+STM __inc__t, A
+LDM A, __inc__t
+INC A
+STM __inc__t, A
+LDM A, __inc__t
+PUSH A
+PUSH16 OP
+RET
+
+; ===== MAIN =====
+__start:
+LDI A, 41
+PUSH A
+CALL inc
+POP A
+STM x, A
+LDM A, x
+OUT 0, A
+HALT
 
 HALT
+
 ; ===== DATA =====
 
-i: $ 0
-numchr: $ 0
+__inc__a: $ 0
+__inc__t: $ 0
+x: $ 0

@@ -1,9 +1,13 @@
-let: i = u8
-let: numchr = u8
-i = 10
-while (i > 0) {
-    numchr = i
-    numchr -= 56
-    mem[65520] = numchr
-    i--
+func inc(a: u8) {
+    let: t = u8
+    t = a
+    t++
+    return t
 }
+
+let: x = u8
+
+x = call inc(41)
+out(0, x)          // ожидаем 42
+
+halt
